@@ -32,13 +32,13 @@ def create_item_to_monster_map(cache_file="item_map_cache.json"):
     # 讀取別名檔案
     alias_data = {}
     try:
-        with open("alias.json", "r", encoding="utf-8") as f:
+        with open("item_alias.json", "r", encoding="utf-8") as f:
             alias_data = json.load(f)
-        print("成功載入 alias.json。")
+        print("成功載入 item_alias.json。")
     except FileNotFoundError:
-        print("警告：找不到 alias.json 檔案，將不使用別名功能。")
+        print("警告：找不到 item_alias.json 檔案，將不使用別名功能。")
     except json.JSONDecodeError:
-        print("警告：alias.json 檔案格式不正確，無法解析，將不使用別名功能。")
+        print("警告：item_alias.json 檔案格式不正確，無法解析，將不使用別名功能。")
 
     # 建立新的資料結構:
     # - 真實物品: {"monsters": [...]}

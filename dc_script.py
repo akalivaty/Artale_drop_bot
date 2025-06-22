@@ -13,8 +13,23 @@ if not TOKEN:
     raise ValueError("在 .env 檔案中找不到 DISCORD_TOKEN")
 
 # --- 新增：啟動時載入通用別名 ---
+MOSTER_DROP_DATA = {}
+ITEM_TO_MONSTER = {}
 GENERAL_ALIASES = {}
 try:
+    # 怪物掉落資訊
+    if os.path.exists("drop_data.json"):
+        try:
+            with open("drop_data.json", "r", encoding="utf-8") as f:
+                print("成功從 drop_data.json 載入資料。")
+                MOSTER_DROP_DATA = json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"讀取快取檔案時發生錯誤 ({e})，將重新建立。")
+
+    # 掉落物 to 怪物
+    ITEM_TO_MONSTER = create_item_to_monster_map()
+
+    # 掉落物通用別名
     with open("general_alias.json", "r", encoding="utf-8") as f:
         GENERAL_ALIASES = json.load(f)
     print("成功載入 general_alias.json。")
@@ -55,20 +70,22 @@ def apply_general_aliases(query: str) -> str:
 
 
 def search_drops(item_query: str) -> str:
-    item_to_monsters = create_item_to_monster_map()
+    """
+    根據掉落物名稱關鍵字模糊搜尋其所有掉落怪物 
+    """
     keywords = item_query.split()
 
     found_results = {}
 
-    for item_name, data in item_to_monsters.items():
+    for item_name, data in ITEM_TO_MONSTER.items():
         if all(key in item_name for key in keywords):
             if "real_name" in data:
                 real_name = data["real_name"]
                 if (
-                    real_name in item_to_monsters
-                    and "monsters" in item_to_monsters[real_name]
+                    real_name in ITEM_TO_MONSTER
+                    and "monsters" in ITEM_TO_MONSTER[real_name]
                 ):
-                    monsters = item_to_monsters[real_name]["monsters"]
+                    monsters = ITEM_TO_MONSTER[real_name]["monsters"]
                     found_results[real_name] = {
                         "monsters": monsters,
                         "matched_name": item_name,
@@ -89,7 +106,6 @@ def search_drops(item_query: str) -> str:
     output_lines = []
     display_keywords = " ".join(keywords)
     output_lines.append(f"找到含有【{display_keywords}】的掉落物結果")
-    # output_lines.append("")  # 空一行
 
     sorted_items = sorted(
         found_results.items(), key=lambda item: item[1]["matched_name"]
@@ -111,7 +127,42 @@ def search_drops(item_query: str) -> str:
     final_message = "\n".join(output_lines)
 
     # Discord 訊息長度限制為 2000 字元
-    if len(final_message) > 1990:  # 預留空間給 code block
+    if len(final_message) > 2000:
+        return "結果太多，無法在單一訊息中顯示。請嘗試更精確的關鍵字。"
+
+    return final_message
+
+
+def search_monster_drops(monster_query: str) -> str:
+    """
+    根據怪物名稱關鍵字模糊搜尋其所有掉落物。
+    """
+    found_monsters = {}
+    # 遍歷所有怪物，如果使用者輸入的關鍵字在怪物名稱中，就加入結果
+    for monster_name, items in MOSTER_DROP_DATA.items():
+        if monster_query in monster_name:
+            found_monsters[monster_name] = items
+
+    if not found_monsters:
+        return f"找不到任何名稱中含有【{monster_query}】的怪物。"
+
+    output_lines = []
+    output_lines.append(f"找到名稱中含有【{monster_query}】的怪物")
+
+    # 按照怪物名稱字母順序排序結果
+    for monster_name, items in sorted(found_monsters.items()):
+        output_lines.append("-" * 50)
+        output_lines.append(f"【**{monster_name}**】的掉落物:")
+        if items:
+            for item in sorted(items):
+                output_lines.append(f"- {item}")
+        else:
+            output_lines.append("(無掉落物)")
+
+    final_message = "\n".join(output_lines)
+
+    # 檢查訊息長度
+    if len(final_message) > 2000:
         return "結果太多，無法在單一訊息中顯示。請嘗試更精確的關鍵字。"
 
     return final_message
@@ -129,6 +180,30 @@ async def search_drops_command(interaction: discord.Interaction, item: str):
         # 2. 執行您的耗時邏輯
         processed_query = apply_general_aliases(item)
         output = search_drops(processed_query)
+
+        # 3. 傳送最終結果
+        await interaction.followup.send(output)
+
+    except Exception as e:
+        # 如果發生錯誤，發送錯誤訊息
+        if not interaction.response.is_done():
+            await interaction.response.send_message(f"執行時發生錯誤：{e}")
+        else:
+            await interaction.followup.send(f"執行時發生錯誤：{e}")
+        print(f"執行指令時發生錯誤: {e}")
+
+
+@bot.tree.command(name="mons", description="查詢指定怪物的所有掉落物")
+async def search_monster_drops_command(interaction: discord.Interaction, monster: str):
+    """
+    一個 Discord 斜線指令，用來查詢怪物的掉落物。
+    """
+    try:
+        # 1. 立即回應
+        await interaction.response.defer()
+
+        # 2. 執行搜尋邏輯
+        output = search_monster_drops(monster)
 
         # 3. 傳送最終結果
         await interaction.followup.send(output)

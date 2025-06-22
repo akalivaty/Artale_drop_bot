@@ -1,8 +1,10 @@
+import json
+import os
+
 import discord
 from discord.ext import commands
-import os
+
 from py_drops import create_item_to_monster_map
-import json
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 

@@ -5,6 +5,7 @@ import discord
 from discord.ext import commands
 
 from py_drops import create_item_to_monster_map
+import unicodedata
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -39,7 +40,6 @@ except json.JSONDecodeError:
     print("警告：general_alias.json 格式錯誤，將不使用通用別名功能。")
 
 # 設定 Bot 的指令前綴和必要的 intents
-# intents 是必要的，以確保您的機器人可以讀取訊息內容
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="/", intents=intents)
@@ -69,9 +69,34 @@ def apply_general_aliases(query: str) -> str:
     return processed_query
 
 
+def get_display_width(text):
+    """計算字串的實際顯示寬度（中日韓全形算2，半形算1）"""
+    width = 0
+    for ch in text:
+        if unicodedata.east_asian_width(ch) in ("F", "W", "A"):
+            width += 2
+        else:
+            width += 1
+    return width
+
+
+def pad_to_width(text, total_width=30):
+    """將字串補空格到指定寬度"""
+    pad_len = total_width - get_display_width(text)
+    return text + " " * max(0, pad_len)
+
+
+def calc_tab_count(left: str, min_tabs=3, tab_width=8):
+    """根據左側字串長度自動決定需要幾個 tab 才能對齊右側"""
+    width = get_display_width(left)
+    # 每個 tab 約等於 tab_width 個半形字
+    tabs = max(min_tabs, (tab_width * min_tabs - width) // tab_width)
+    return "\t" * tabs
+
+
 def search_drops(item_query: str) -> str:
     """
-    根據掉落物名稱關鍵字模糊搜尋其所有掉落怪物 
+    根據掉落物名稱關鍵字模糊搜尋其所有掉落怪物
     """
     keywords = item_query.split()
 
@@ -108,7 +133,7 @@ def search_drops(item_query: str) -> str:
     output_lines.append(f"找到含有【{display_keywords}】的掉落物結果")
 
     sorted_items = sorted(
-        found_results.items(), key=lambda item: item[1]["matched_name"]
+        found_results.items(), key=lambda item: len(item[1]["matched_name"])
     )
 
     for real_name, result_data in sorted_items:
@@ -119,18 +144,33 @@ def search_drops(item_query: str) -> str:
             f"{matched_name} ({real_name})" if real_name != matched_name else real_name
         )
 
+        output_lines.append(" ")
         output_lines.append("-" * 50)
-        output_lines.append(f"掉落物:【**{display_name}**】")
-        for monster in sorted(monsters):
-            output_lines.append(f"- {monster}")
+        output_lines.append(" ")
+        output_lines.append(f"掉落物:【{display_name}】")
+        output_lines.append(" ")
+        # 先計算這批 monsters 的最大寬度
+        max_width = max(get_display_width(x) for x in monsters) if monsters else 0
+
+        if monsters:
+            row = []
+            for idx, monster in enumerate(sorted(monsters, key=len), 1):
+                row.append(monster)
+                if idx % 2 == 0:
+                    left = pad_to_width(row[0], max_width)
+                    output_lines.append(f"{left}\t{row[1]}")
+                    row = []
+            if row:
+                output_lines.append(row[0])
+        else:
+            output_lines.append("(無掉落怪物)")
 
     final_message = "\n".join(output_lines)
 
-    # Discord 訊息長度限制為 2000 字元
     if len(final_message) > 2000:
         return "結果太多，無法在單一訊息中顯示。請嘗試更精確的關鍵字。"
 
-    return final_message
+    return f"```\n{final_message}\n```"
 
 
 def search_monster_drops(monster_query: str) -> str:
@@ -138,7 +178,6 @@ def search_monster_drops(monster_query: str) -> str:
     根據怪物名稱關鍵字模糊搜尋其所有掉落物。
     """
     found_monsters = {}
-    # 遍歷所有怪物，如果使用者輸入的關鍵字在怪物名稱中，就加入結果
     for monster_name, items in MOSTER_DROP_DATA.items():
         if monster_query in monster_name:
             found_monsters[monster_name] = items
@@ -149,23 +188,32 @@ def search_monster_drops(monster_query: str) -> str:
     output_lines = []
     output_lines.append(f"找到名稱中含有【{monster_query}】的怪物")
 
-    # 按照怪物名稱字母順序排序結果
-    for monster_name, items in sorted(found_monsters.items()):
+    for monster_name, items in sorted(found_monsters.items(), key=lambda x: len(x[0])):
+        output_lines.append(" ")
         output_lines.append("-" * 50)
-        output_lines.append(f"【**{monster_name}**】的掉落物:")
+        output_lines.append(" ")
+        output_lines.append(f"【{monster_name}】的掉落物:")
+        output_lines.append(" ")
+        # 先計算這批 items 的最大寬度
+        max_width = max(get_display_width(x) for x in items) if items else 0
+
         if items:
-            for item in sorted(items):
-                output_lines.append(f"- {item}")
+            row = []
+            for idx, item in enumerate(sorted(items, key=len), 1):
+                row.append(item)
+                if idx % 2 == 0:
+                    left = pad_to_width(row[0], max_width)
+                    output_lines.append(f"{left}\t{row[1]}")
+                    row = []
+            if row:
+                output_lines.append(row[0])
         else:
             output_lines.append("(無掉落物)")
 
     final_message = "\n".join(output_lines)
-
-    # 檢查訊息長度
     if len(final_message) > 2000:
         return "結果太多，無法在單一訊息中顯示。請嘗試更精確的關鍵字。"
-
-    return final_message
+    return f"```\n{final_message}\n```"
 
 
 @bot.tree.command(name="drop", description="查詢物品的掉落怪物")
@@ -217,5 +265,5 @@ async def search_monster_drops_command(interaction: discord.Interaction, monster
         print(f"執行指令時發生錯誤: {e}")
 
 
-# 執行 Bot
+# 執行
 bot.run(TOKEN)
